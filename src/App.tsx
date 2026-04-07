@@ -480,7 +480,7 @@ export default function App() {
         <div className="bg-slate-100/50 p-4 rounded-2xl flex gap-3 items-start">
           <Info className="w-5 h-5 text-slate-400 shrink-0 mt-0.5" />
           <p className="text-xs text-slate-500 leading-relaxed">
-            Memorize the color and its HEX code. In the selection phase, you'll see four similar colors. 
+            Memorize the color. In the selection phase, you'll see four similar colors. 
             Pick the exact one to increase your score and level up. As you level up, the colors become more similar!
           </p>
         </div>
