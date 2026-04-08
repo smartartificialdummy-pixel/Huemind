@@ -8,6 +8,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { RefreshCw, CheckCircle2, XCircle, Trophy, Info, Heart } from 'lucide-react';
 
 type GamePhase = 'START' | 'MEMORIZE' | 'SELECT' | 'RESULT' | 'GAME_OVER';
+type GameMode = 'NORMAL' | 'INFINITY';
 
 interface Color {
   hex: string;
@@ -64,33 +65,49 @@ const generateRandomColor = (): Color => {
   return { hex: rgbToHex(r, g, b), r, g, b, oklab: rgbToOklab(r, g, b) };
 };
 
-const generateSimilarColor = (base: Color, difficulty: number): Color => {
-  // Higher difficulty = smaller offset
-  // Difficulty starts at 1 and increases.
-  // Greater difficulty gap in first 5 levels
-  let range;
-  if (difficulty <= 5) {
-    // Start very easy (120) and drop quickly to 40 by level 5
-    range = 120 - (difficulty - 1) * 20;
-  } else {
-    // Continue with a slower decay
-    range = Math.max(5, 40 / Math.pow(difficulty - 4, 0.5));
+const generateSimilarColor = (base: Color, distance: number): Color => {
+  // To ensure the Euclidean distance is exactly 'distance', we pick a random point on a sphere.
+  // We try a few times if the point falls outside the RGB cube [0, 255].
+  let r = base.r, g = base.g, b = base.b;
+  let attempts = 0;
+  
+  while (attempts < 20) {
+    // Random point on sphere using spherical coordinates
+    const phi = Math.random() * 2 * Math.PI;
+    const cosTheta = Math.random() * 2 - 1;
+    const sinTheta = Math.sqrt(1 - cosTheta * cosTheta);
+    
+    const dr = sinTheta * Math.cos(phi) * distance;
+    const dg = sinTheta * Math.sin(phi) * distance;
+    const db = cosTheta * distance;
+    
+    const tr = base.r + dr;
+    const tg = base.g + dg;
+    const tb = base.b + db;
+    
+    // Check if within bounds
+    if (tr >= 0 && tr <= 255 && tg >= 0 && tg <= 255 && tb >= 0 && tb <= 255) {
+      r = tr;
+      g = tg;
+      b = tb;
+      break;
+    }
+    attempts++;
   }
   
-  const getOffset = () => (Math.random() - 0.5) * 2 * range;
-  
-  let r = base.r + getOffset();
-  let g = base.g + getOffset();
-  let b = base.b + getOffset();
-  
-  // Clamp values
-  r = Math.max(0, Math.min(255, r));
-  g = Math.max(0, Math.min(255, g));
-  b = Math.max(0, Math.min(255, b));
-  
-  // Ensure it's actually different enough to not be identical but close
-  if (Math.abs(r - base.r) + Math.abs(g - base.g) + Math.abs(b - base.b) < 5) {
-    r = (r + 10) % 255;
+  // Fallback: if we couldn't find a point on the sphere within bounds,
+  // we pick a direction towards the center of the cube to guarantee a valid color.
+  if (attempts === 20) {
+    const dr_center = 127.5 - base.r;
+    const dg_center = 127.5 - base.g;
+    const db_center = 127.5 - base.b;
+    const mag = Math.sqrt(dr_center * dr_center + dg_center * dg_center + db_center * db_center);
+    
+    // If target is exactly at center, any direction works
+    const scale = mag > 0 ? distance / mag : 0;
+    r = Math.max(0, Math.min(255, base.r + dr_center * scale));
+    g = Math.max(0, Math.min(255, base.g + dg_center * scale));
+    b = Math.max(0, Math.min(255, base.b + db_center * scale));
   }
 
   return { hex: rgbToHex(r, g, b), r, g, b, oklab: rgbToOklab(r, g, b) };
@@ -108,8 +125,45 @@ const calculateAccuracy = (c1: Color, c2: Color): number => {
   return parseFloat(accuracy.toFixed(1));
 };
 
+const getColorAnalysis = (history: {target: Color, selected: Color}[]) => {
+  if (history.length === 0) return null;
+
+  let lightnessDiff = 0;
+  const hueCounts: Record<string, number> = {};
+
+  history.forEach(({ target, selected }) => {
+    lightnessDiff += (parseFloat(selected.oklab.L) - parseFloat(target.oklab.L));
+    
+    const r = target.r, g = target.g, b = target.b;
+    let hue = "Neutral";
+    if (r > g + 40 && r > b + 40) hue = "Red";
+    else if (g > r + 40 && g > b + 40) hue = "Green";
+    else if (b > r + 40 && b > g + 40) hue = "Blue";
+    else if (r > b + 40 && g > b + 40) hue = "Yellow";
+    else if (r > g + 40 && b > g + 40) hue = "Purple";
+    else if (g > r + 40 && b > r + 40) hue = "Cyan";
+    
+    hueCounts[hue] = (hueCounts[hue] || 0) + 1;
+  });
+
+  const avgLightnessDiff = lightnessDiff / history.length;
+  const topHueEntry = Object.entries(hueCounts).sort((a, b) => b[1] - a[1])[0];
+  const topHue = topHueEntry ? topHueEntry[0] : "varied";
+
+  let lightnessText = "";
+  if (Math.abs(avgLightnessDiff) > 0.03) {
+    lightnessText = `You tend to pick colors that are ${avgLightnessDiff > 0 ? 'lighter' : 'darker'} than the target. `;
+  }
+
+  return {
+    summary: `${lightnessText}You struggle most with ${topHue.toLowerCase()} tones.`,
+    topHue
+  };
+};
+
 export default function App() {
   const [phase, setPhase] = useState<GamePhase>('START');
+  const [mode, setMode] = useState<GameMode>('NORMAL');
   const [targetColor, setTargetColor] = useState<Color>(generateRandomColor());
   const [options, setOptions] = useState<Color[]>([]);
   const [selectedColor, setSelectedColor] = useState<Color | null>(null);
@@ -120,6 +174,7 @@ export default function App() {
   const [lastPoints, setLastPoints] = useState(0);
   const [highScore, setHighScore] = useState(0);
   const [leaderboard, setLeaderboard] = useState<{score: number, date: string}[]>([]);
+  const [incorrectHistory, setIncorrectHistory] = useState<{level: number, target: Color, selected: Color, options: Color[]}[]>([]);
 
   useEffect(() => {
     const saved = localStorage.getItem('chroma_leaderboard');
@@ -147,10 +202,14 @@ export default function App() {
   }, []);
 
   const generateOptions = useCallback(() => {
+    // Difficulty formula: 120 - (difficulty - 1) * 10
+    // After level 10, fix the color range to 20
+    const distance = difficulty > 10 ? 20 : 120 - (difficulty - 1) * 10;
+
     const others = [
-      generateSimilarColor(targetColor, difficulty),
-      generateSimilarColor(targetColor, difficulty),
-      generateSimilarColor(targetColor, difficulty),
+      generateSimilarColor(targetColor, distance),
+      generateSimilarColor(targetColor, distance),
+      generateSimilarColor(targetColor, distance),
     ];
     const allOptions = [targetColor, ...others].sort(() => Math.random() - 0.5);
     setOptions(allOptions);
@@ -177,13 +236,17 @@ export default function App() {
       setDifficulty(d => d + 1);
     } else {
       setStreak(0);
-      setLives(l => {
-        const newLives = l - 1;
-        if (newLives <= 0) {
-          saveToLeaderboard(score + finalPoints);
-        }
-        return newLives;
-      });
+      setIncorrectHistory(prev => [...prev, { level: difficulty, target: targetColor, selected: color, options: [...options] }]);
+      
+      if (mode === 'NORMAL') {
+        setLives(l => {
+          const newLives = l - 1;
+          if (newLives <= 0) {
+            saveToLeaderboard(score + finalPoints);
+          }
+          return newLives;
+        });
+      }
     }
     
     setPhase('RESULT');
@@ -198,6 +261,17 @@ export default function App() {
     setStreak(0);
     setLives(3);
     setDifficulty(1);
+    setIncorrectHistory([]);
+    setPhase('START');
+  };
+
+  const startGame = (selectedMode: GameMode) => {
+    setMode(selectedMode);
+    setScore(0);
+    setStreak(0);
+    setLives(3);
+    setDifficulty(1);
+    setIncorrectHistory([]);
     startNewRound();
   };
 
@@ -213,12 +287,16 @@ export default function App() {
               Score: {score}
             </span>
             <div className="flex gap-1">
-              {[...Array(3)].map((_, i) => (
-                <Heart 
-                  key={i} 
-                  className={`w-4 h-4 ${i < lives ? 'text-rose-500 fill-rose-500' : 'text-slate-300'}`} 
-                />
-              ))}
+              {mode === 'NORMAL' ? (
+                [...Array(3)].map((_, i) => (
+                  <Heart 
+                    key={i} 
+                    className={`w-4 h-4 ${i < lives ? 'text-rose-500 fill-rose-500' : 'text-slate-300'}`} 
+                  />
+                ))
+              ) : (
+                <span className="text-rose-500 font-black text-lg leading-none">∞</span>
+              )}
             </div>
             {streak > 0 && (
               <span className="flex items-center gap-1 text-orange-500 font-bold animate-pulse">
@@ -251,12 +329,20 @@ export default function App() {
                   <h2 className="text-2xl font-semibold">Ready to test your eyes?</h2>
                   <p className="text-slate-500 text-sm">Memorize the color code, then find it among similar shades.</p>
                 </div>
-                <button
-                  onClick={startNewRound}
-                  className="w-full py-4 bg-slate-900 text-white rounded-xl font-semibold hover:bg-slate-800 transition-colors shadow-lg shadow-slate-200 active:scale-[0.98]"
-                >
-                  Start Game
-                </button>
+                <div className="grid gap-3">
+                  <button
+                    onClick={() => startGame('NORMAL')}
+                    className="w-full py-4 bg-slate-900 text-white rounded-xl font-semibold hover:bg-slate-800 transition-colors shadow-lg shadow-slate-200 active:scale-[0.98]"
+                  >
+                    Normal Mode
+                  </button>
+                  <button
+                    onClick={() => startGame('INFINITY')}
+                    className="w-full py-4 bg-white text-slate-900 border-2 border-slate-900 rounded-xl font-semibold hover:bg-slate-50 transition-colors active:scale-[0.98]"
+                  >
+                    Infinity Mode
+                  </button>
+                </div>
               </motion.div>
             )}
 
@@ -400,18 +486,18 @@ export default function App() {
                   
                   <div className="flex gap-3">
                     <button
-                      onClick={lives > 0 ? startNewRound : () => setPhase('GAME_OVER')}
+                      onClick={lives > 0 || mode === 'INFINITY' ? startNewRound : () => setPhase('GAME_OVER')}
                       className="flex-1 py-4 bg-slate-900 text-white rounded-xl font-semibold hover:bg-slate-800 transition-colors shadow-lg shadow-slate-200 active:scale-[0.98]"
                     >
-                      {lives > 0 ? 'Continue' : 'See Result'}
+                      {lives > 0 || mode === 'INFINITY' ? 'Continue' : 'See Result'}
                     </button>
-                    {lives > 0 && (
+                    {(lives > 0 || mode === 'INFINITY') && (
                       <button
-                        onClick={resetGame}
+                        onClick={mode === 'INFINITY' ? () => { saveToLeaderboard(score); setPhase('GAME_OVER'); } : resetGame}
                         className="p-4 bg-slate-100 text-slate-600 rounded-xl hover:bg-slate-200 transition-colors"
-                        title="Reset Game"
+                        title={mode === 'INFINITY' ? "End Game" : "Reset Game"}
                       >
-                        <RefreshCw className="w-6 h-6" />
+                        {mode === 'INFINITY' ? <XCircle className="w-6 h-6" /> : <RefreshCw className="w-6 h-6" />}
                       </button>
                     )}
                   </div>
@@ -469,29 +555,53 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="space-y-3">
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Final Round Options:</p>
-                  <div className="grid grid-cols-2 gap-0 rounded-xl overflow-hidden border border-slate-100 max-w-[120px] mx-auto">
-                    {options.map((color, idx) => (
-                      <div 
-                        key={idx}
-                        className="aspect-square relative transition-all"
-                        style={{ backgroundColor: color.hex }}
-                      >
-                        {color.hex === targetColor.hex && (
-                          <div className="absolute top-1 left-1 bg-emerald-500 rounded-full p-0.5 border border-white shadow-sm z-10">
-                            <CheckCircle2 className="w-2 h-2 text-white" />
-                          </div>
-                        )}
-                        {color.hex === selectedColor.hex && color.hex !== targetColor.hex && (
-                          <div className="absolute top-1 left-1 bg-rose-500 rounded-full p-0.5 border border-white shadow-sm z-10">
-                            <XCircle className="w-2 h-2 text-white" />
-                          </div>
-                        )}
-                      </div>
-                    ))}
+                {incorrectHistory.length > 0 && (
+                  <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4 text-left space-y-2">
+                    <div className="flex items-center gap-2 text-amber-700">
+                      <Info className="w-4 h-4" />
+                      <span className="text-xs font-bold uppercase tracking-wider">Color Perception Insight</span>
+                    </div>
+                    <p className="text-sm text-amber-900 font-medium leading-relaxed">
+                      {getColorAnalysis(incorrectHistory)?.summary}
+                    </p>
                   </div>
-                </div>
+                )}
+
+                {incorrectHistory.length > 0 && (
+                  <div className="space-y-4 pt-6 border-t border-slate-100">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Mistakes This Run</p>
+                    <div className="grid grid-cols-2 gap-6">
+                      {incorrectHistory.map((item, idx) => (
+                        <div key={idx} className="space-y-2">
+                          <div className="grid grid-cols-2 gap-0 rounded-xl overflow-hidden border border-slate-200 shadow-sm">
+                            {item.options.map((opt, optIdx) => (
+                              <div 
+                                key={optIdx}
+                                className="aspect-square relative"
+                                style={{ backgroundColor: opt.hex }}
+                              >
+                                {opt.hex === item.target.hex && (
+                                  <div className="absolute top-0.5 left-0.5 bg-emerald-500 rounded-full p-0.5 border border-white shadow-sm z-10">
+                                    <CheckCircle2 className="w-1.5 h-1.5 text-white" />
+                                  </div>
+                                )}
+                                {opt.hex === item.selected.hex && opt.hex !== item.target.hex && (
+                                  <div className="absolute top-0.5 left-0.5 bg-rose-500 rounded-full p-0.5 border border-white shadow-sm z-10">
+                                    <XCircle className="w-1.5 h-1.5 text-white" />
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                          <div className="flex justify-between items-center px-1">
+                            <span className="text-[10px] font-black text-slate-500 uppercase">Level {item.level}</span>
+                            <span className="text-[8px] font-bold text-slate-400">{calculateAccuracy(item.target, item.selected)}% Acc</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {leaderboard.length > 0 && (
                   <div className="bg-slate-50 rounded-2xl p-6 pt-4 border-t border-slate-200">
