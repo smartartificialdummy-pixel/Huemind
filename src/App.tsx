@@ -399,12 +399,6 @@ export default function App() {
                     className="w-full aspect-square max-w-[200px] mx-auto rounded-3xl shadow-inner border-4 border-white"
                     style={{ backgroundColor: targetColor.hex }}
                   />
-                  <div className="font-mono text-xl font-bold text-slate-800 tracking-tight space-y-1">
-                    <div className="text-xs text-slate-400 uppercase">OKLab</div>
-                    <div>L: {targetColor.oklab.L}</div>
-                    <div>a: {targetColor.oklab.a}</div>
-                    <div>b: {targetColor.oklab.b}</div>
-                  </div>
                 </div>
                 <button
                   onClick={generateOptions}
@@ -434,10 +428,13 @@ export default function App() {
                       whileHover={{ scale: 1.02 }}
                       whileTap={{ scale: 0.98 }}
                       onClick={() => handleSelect(color)}
-                      className="aspect-square transition-colors relative group"
+                      className="aspect-square transition-colors relative group flex flex-col items-center justify-end pb-2"
                       style={{ backgroundColor: color.hex }}
                     >
                       <div className="absolute inset-0 bg-black/0 group-hover:bg-black/5 transition-colors" />
+                      <div className="relative z-10 bg-black/20 backdrop-blur-[2px] rounded px-1.5 py-0.5 font-mono text-[7px] text-white leading-none border border-white/10">
+                        L:{color.oklab.L} a:{color.oklab.a} b:{color.oklab.b}
+                      </div>
                     </motion.button>
                   ))}
                 </div>
@@ -487,7 +484,7 @@ export default function App() {
                       {options.map((color, idx) => (
                         <div 
                           key={idx}
-                          className="aspect-square relative transition-all"
+                          className="aspect-square relative transition-all flex flex-col items-center justify-end pb-1"
                           style={{ backgroundColor: color.hex }}
                         >
                           {color.hex === targetColor.hex && (
@@ -500,6 +497,9 @@ export default function App() {
                               <XCircle className="w-2 h-2 text-white" />
                             </div>
                           )}
+                          <div className="relative z-10 bg-black/20 backdrop-blur-[1px] rounded px-1 py-0.5 font-mono text-[5px] text-white leading-none border border-white/5">
+                            L:{color.oklab.L} a:{color.oklab.a} b:{color.oklab.b}
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -618,7 +618,7 @@ export default function App() {
                             {item.options.map((opt, optIdx) => (
                               <div 
                                 key={optIdx}
-                                className="aspect-square relative"
+                                className="aspect-square relative flex flex-col items-center justify-end pb-0.5"
                                 style={{ backgroundColor: opt.hex }}
                               >
                                 {opt.hex === item.target.hex && (
@@ -631,6 +631,9 @@ export default function App() {
                                     <XCircle className="w-1.5 h-1.5 text-white" />
                                   </div>
                                 )}
+                                <div className="relative z-10 bg-black/20 backdrop-blur-[1px] rounded px-0.5 py-0.5 font-mono text-[4px] text-white leading-none scale-[0.9]">
+                                  L:{opt.oklab.L} a:{opt.oklab.a} b:{opt.oklab.b}
+                                </div>
                               </div>
                             ))}
                           </div>
