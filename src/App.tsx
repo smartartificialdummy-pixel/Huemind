@@ -58,6 +58,31 @@ const rgbToHex = (r: number, g: number, b: number): string => {
   return `#${toHex(r)}${toHex(g)}${toHex(b)}`.toUpperCase();
 };
 
+const COLOR_FAMILIES = [
+  { name: 'Red', range: { r: [180, 255], g: [0, 80], b: [0, 80] } },
+  { name: 'Green', range: { r: [0, 80], g: [180, 255], b: [0, 80] } },
+  { name: 'Blue', range: { r: [0, 80], g: [0, 80], b: [180, 255] } },
+  { name: 'Yellow', range: { r: [180, 255], g: [180, 255], b: [0, 80] } },
+  { name: 'Cyan', range: { r: [0, 80], g: [180, 255], b: [180, 255] } },
+  { name: 'Magenta', range: { r: [180, 255], g: [0, 80], b: [180, 255] } },
+  { name: 'Orange', range: { r: [200, 255], g: [100, 160], b: [0, 40] } },
+  { name: 'Purple', range: { r: [100, 160], g: [0, 80], b: [180, 255] } },
+  { name: 'Pink', range: { r: [200, 255], g: [100, 160], b: [150, 200] } },
+  { name: 'Teal', range: { r: [0, 80], g: [100, 160], b: [100, 160] } },
+];
+
+const generateColorForLevel = (level: number): Color => {
+  // Randomize the color family instead of using a fixed sequence
+  const family = COLOR_FAMILIES[Math.floor(Math.random() * COLOR_FAMILIES.length)];
+  const { r: rRange, g: gRange, b: bRange } = family.range;
+  
+  const r = Math.floor(Math.random() * (rRange[1] - rRange[0] + 1)) + rRange[0];
+  const g = Math.floor(Math.random() * (gRange[1] - gRange[0] + 1)) + gRange[0];
+  const b = Math.floor(Math.random() * (bRange[1] - bRange[0] + 1)) + bRange[0];
+  
+  return { hex: rgbToHex(r, g, b), r, g, b, oklab: rgbToOklab(r, g, b) };
+};
+
 const generateRandomColor = (): Color => {
   const r = Math.floor(Math.random() * 256);
   const g = Math.floor(Math.random() * 256);
@@ -194,8 +219,9 @@ export default function App() {
     localStorage.setItem('chroma_leaderboard', JSON.stringify(updated));
     if (updated.length > 0) setHighScore(updated[0].score);
   }, [leaderboard]);
-  const startNewRound = useCallback(() => {
-    const newTarget = generateRandomColor();
+
+  const startNewRound = useCallback((level: number) => {
+    const newTarget = generateColorForLevel(level);
     setTargetColor(newTarget);
     setPhase('MEMORIZE');
     setSelectedColor(null);
@@ -272,7 +298,7 @@ export default function App() {
     setLives(3);
     setDifficulty(1);
     setIncorrectHistory([]);
-    startNewRound();
+    startNewRound(1);
   };
 
   return (
@@ -477,16 +503,18 @@ export default function App() {
                     <div className="p-4 bg-rose-50 text-rose-700 rounded-xl text-sm font-medium">
                       <div className="text-xl font-black mb-1">Missed!</div>
                       <p>
-                        {lives > 0 
-                          ? `Streak reset. You have ${lives} ${lives === 1 ? 'life' : 'lives'} left!` 
-                          : 'That was your last life!'}
+                        {mode === 'INFINITY' 
+                          ? 'Streak reset. Try again to improve your accuracy!'
+                          : lives > 0 
+                            ? `Streak reset. You have ${lives} ${lives === 1 ? 'life' : 'lives'} left!` 
+                            : 'That was your last life!'}
                       </p>
                     </div>
                   )}
                   
                   <div className="flex gap-3">
                     <button
-                      onClick={lives > 0 || mode === 'INFINITY' ? startNewRound : () => setPhase('GAME_OVER')}
+                      onClick={lives > 0 || mode === 'INFINITY' ? () => startNewRound(difficulty) : () => setPhase('GAME_OVER')}
                       className="flex-1 py-4 bg-slate-900 text-white rounded-xl font-semibold hover:bg-slate-800 transition-colors shadow-lg shadow-slate-200 active:scale-[0.98]"
                     >
                       {lives > 0 || mode === 'INFINITY' ? 'Continue' : 'See Result'}
